@@ -1,5 +1,7 @@
 # Firecrawl — web scraping, crawling, and search
-# https://docs.firecrawl.dev
+# Cloud: https://docs.firecrawl.dev
+# Self-hosted: https://docs.firecrawl.dev/self-hosting
+# CLI: https://docs.firecrawl.dev/sdks/cli
 
 name: firecrawl
 display: "Firecrawl"
@@ -17,13 +19,21 @@ auth:
       label: "API Key"
       placeholder: "fc-..."
       input_type: password
-      help_text: "Get your API key from https://firecrawl.dev/dashboard"
+      help_text: "Get your API key from https://firecrawl.dev/dashboard. Not required if using self-hosted."
+      optional: true
+    - name: base_url
+      label: "Self-Hosted URL"
+      placeholder: "https://firecrawl.example.com"
+      input_type: url
+      help_text: "Leave empty for Firecrawl Cloud. Fill in for self-hosted instance."
+      optional: true
 tool_source:
   type: cli
   command: firecrawl
   install: npm install -g firecrawl@latest
   env_mapping:
     api_key: FIRECRAWL_API_KEY
+    base_url: FIRECRAWL_BASE_URL
 tool_descriptions:
   - name: firecrawl__scrape_url
     description: "Scrape a URL and return clean markdown content. Use for reading any webpage. Supports multiple output formats."
@@ -39,16 +49,3 @@ tool_descriptions:
     description: "Discover and list all URLs on a website. Use to find pages on a domain."
     parameter_descriptions:
       url: "The base URL to map"
-  - name: firecrawl__crawl_url
-    description: "Crawl multiple pages from a starting URL, following links up to a depth limit."
-    parameter_descriptions:
-      url: "Starting URL for the crawl"
-      max_depth: "Maximum link depth to follow (default: 3)"
-  - name: firecrawl__get_crawl_status
-    description: "Check the status of a running crawl job."
-    parameter_descriptions:
-      id: "Crawl job ID returned from crawl_url"
-  - name: firecrawl__cancel_crawl
-    description: "Cancel a running crawl job."
-    parameter_descriptions:
-      id: "Crawl job ID to cancel"

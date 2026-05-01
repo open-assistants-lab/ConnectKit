@@ -222,16 +222,35 @@ class TestValidationErrors:
         with pytest.raises(ValidationError):
             ConnectorSpec.from_yaml(str(spec_yaml))
 
-    def test_missing_tool_source(self, tmp_path: Path):
-        spec_yaml = tmp_path / "bad.yaml"
+    def test_missing_tool_source_is_valid(self, tmp_path: Path):
+        """tool_source is optional. tool_sources can be used instead."""
+        spec_yaml = tmp_path / "minimal.yaml"
         _write_yaml(spec_yaml, {
-            "name": "bad",
-            "display": "Bad",
+            "name": "minimal",
+            "display": "Minimal",
             "auth": {"type": "none"},
+            "tool_sources": [{"type": "cli", "command": "echo", "install": "built-in"}],
         })
 
-        with pytest.raises(ValidationError):
-            ConnectorSpec.from_yaml(str(spec_yaml))
+        spec = ConnectorSpec.from_yaml(str(spec_yaml))
+        assert spec.tool_source is None
+        assert len(spec.tool_sources) == 1
+        assert spec.tool_sources[0].command == "echo"
+
+    def test_tool_source_still_works(self, tmp_path: Path):
+        """Backward compat: single tool_source still valid."""
+        spec_yaml = tmp_path / "old.yaml"
+        _write_yaml(spec_yaml, {
+            "name": "old-format",
+            "display": "Old Format",
+            "auth": {"type": "none"},
+            "tool_source": {"type": "cli", "command": "echo", "install": "built-in"},
+        })
+
+        spec = ConnectorSpec.from_yaml(str(spec_yaml))
+        sources = spec.get_tool_sources()
+        assert len(sources) == 1
+        assert sources[0].command == "echo"
 
     def test_invalid_tool_source_type(self, tmp_path: Path):
         spec_yaml = tmp_path / "bad.yaml"

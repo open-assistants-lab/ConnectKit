@@ -1,10 +1,10 @@
 # ConnectKit
 
-> **Purposefully built for AI Agents.** ConnectKit gives agents access to user SaaS accounts — Gmail, Calendar, Drive, GitHub, Slack, and more — through one YAML file per service. OAuth, API keys, token vault, and tool discovery handled automatically. Used in production by the [Executive Assistant](https://github.com/open-assistants-lab) agent system.
+> **Purposefully built for AI Agents.** ConnectKit gives agents access to user SaaS accounts — Gmail, Calendar, Drive, GitHub, Slack, and 520+ more — through one YAML file per service. OAuth, API keys, token vault, and tool discovery handled automatically. Used in production by the [Executive Assistant](https://github.com/open-assistants-lab) agent system.
 
-> **Embedded. Local. Open source.** No cloud APIs, no hosted auth services, no internet connection required for setup. Runs entirely on-device with an encrypted SQLite credential vault + local YAML specs. Ships as a single Python package with zero external infrastructure dependencies.
+> **Embedded. Local. Open source.** No cloud APIs, no hosted auth services. Runs entirely on-device with an encrypted SQLite credential vault + local YAML specs. Ships as a single Python package with zero external infrastructure dependencies.
 
-**Connect AI agents to SaaS.** One YAML file per service. OAuth, token vault, and tool discovery — handled automatically.
+**Connect AI agents to SaaS.** One YAML file per service. OAuth, token vault, tool discovery — handled automatically.
 
 ```python
 from connectkit import ConnectKitBridge
@@ -14,31 +14,33 @@ await bridge.discover()
 
 # Agent gets tools for all connected services
 tools = bridge.get_tool_definitions()
-# → [google-workspace__gmail_list, github__issue_list, ...]
+# → [google-workspace__gmail_list, github__issue_list, salesforce__soql_query, ...]
 
 # Show the connector catalog
 catalog = bridge.list_available()
-# → [{name: "google-workspace", connected: true, ...}, ...]
+# → [{name: "google-workspace", connected: true, setup_guide_url: "..."}, ...]
 ```
 
 ## Why ConnectKit?
 
-Every AI agent that needs access to user SaaS accounts ends up wiring three things together: OAuth flows, credential storage, and CLI tool wrappers. You build `/auth/google/login`, `/auth/google/callback`, token refresh logic, subprocess calls for `gws gmail list`... then you do it again for GitHub, again for Outlook.
+Every AI agent that needs access to user SaaS accounts ends up wiring three things together: OAuth flows, credential storage, and CLI/MCP tool wrappers. You build `/auth/google/login`, `/auth/google/callback`, token refresh logic, subprocess calls for `gws gmail list`... then you do it again for GitHub, again for Outlook.
 
 ConnectKit does all of that once, done right. One YAML file per service. No Python code per connector.
 
 | Feature | Status |
 |---------|--------|
+| 524 SaaS connectors (from Nango's 779-provider baseline) | ✅ |
 | YAML-based connector spec (no Python code per service) | ✅ |
 | Encrypted SQLite credential vault (Fernet) | ✅ |
 | Universal OAuth 2.0 router (one endpoint, all services) | ✅ |
 | CLI adapter backend (wraps any SaaS CLI) | ✅ |
 | MCP adapter backend (connects to MCP servers) | ✅ |
+| Dual CLI + MCP support per connector (53+ connectors) | ✅ |
 | Connector catalog (list available services + status) | ✅ |
 | Agent meta-tools (list, connect, disconnect, health) | ✅ |
 | Per-user credential isolation | ✅ |
+| Self-hosted support (base_url for self-hosted instances) | ✅ |
 | No external API dependencies (works offline) | ✅ |
-| 4 connectors shipped (Google Workspace, Microsoft 365, GitHub, Firecrawl) | ✅ |
 
 ## Installation
 
@@ -70,32 +72,30 @@ auth:
     - name: client_secret
       label: "Client Secret"
       input_type: password
-tool_source:
-  type: cli
-  command: gws
-  install: npm install -g @googleworkspace/cli
-  env_mapping:
-    access_token: GWS_ACCESS_TOKEN
-tool_descriptions:
-  - name: google_workspace__gmail_messages_list
-    description: "List recent emails from the user's Gmail inbox"
+tool_sources:
+  - type: cli
+    command: gws
+    install: npm install -g @googleworkspace/cli
+  - type: mcp
+    server_name: google-workspace
+    command: gws mcp
 ```
 
 ### Auth types
 
 | Type | Use for | Example |
 |------|---------|---------|
-| `oauth2` | Services with OAuth 2.0 (Google, Microsoft, GitHub, Slack) | User clicks Connect → browser authorization → tokens vaulted |
-| `api_key` | Services with API keys (Firecrawl, Stripe, Twilio) | User pastes key into form → stored in vault |
-| `none` | No auth needed (local tools, agent-browser) | Auto-connected |
+| `oauth2` | OAuth 2.0 (Google, Microsoft, GitHub, Slack, 234+ services) | Browser authorization → tokens vaulted |
+| `api_key` | API keys (Firecrawl, Stripe, Twilio, 288+ services) | Paste key into form → vaulted |
+| `none` | No auth needed (local tools) | Auto-connected |
 
 ### Tool source backends
 
-| Backend | How it works | Best for |
-|---------|-------------|----------|
-| **CLI** | Subprocess with per-user env vars | Services with good CLIs (gws, gh, m365, firecrawl) |
-| **MCP** | MCP server with vault token injection | Services with MCP servers (gws mcp, dropbox-mcp) |
-| **HTTP** | Declarative REST client (deferred) | Services with REST APIs only |
+| Backend | Count | Best for |
+|---------|-------|----------|
+| **CLI** | 63 | SaaS with official CLIs (gws, gh, glab, m365, stripe, sf, vercel, etc.) |
+| **MCP** | 514 | SaaS with MCP servers (first-party or community) |
+| **Dual** (CLI + MCP) | 53 | Best available backend picked at runtime |
 
 ### CredentialVault
 
@@ -114,7 +114,7 @@ token = vault.get_token("google-workspace")
 ### OAuth flow
 
 ```python
-# 1. User fills in client_id + client_secret → stored in vault
+# 1. User fills in client_id + client_secret → stored in vault via POST /connectors/connect
 # 2. Flutter renders "Connect" button → opens:
 #    GET /auth/login?service=google-workspace&user_id=alice
 # 3. Browser redirects to Google OAuth → user authorizes
@@ -126,14 +126,35 @@ token = vault.get_token("google-workspace")
 
 OAuth states are Fernet-encrypted and self-contained — any vault with the same key can validate them (10-minute TTL).
 
-## Shipped Connectors
+### Self-Hosted Support
 
-| Connector | Auth | Backend | Tools |
-|-----------|------|---------|-------|
-| **Google Workspace** | OAuth2 | GWS CLI | Gmail, Calendar, Drive, Contacts |
-| **Microsoft 365** | OAuth2 | M365 CLI | Outlook, Calendar, OneDrive |
-| **GitHub** | OAuth2 | gh CLI | Issues, PRs, repos, search |
-| **Firecrawl** | API Key | Firecrawl CLI | Scrape, search, crawl |
+Services like Firecrawl, Sentry, GitLab offer self-hosted deployments. ConnectKit supports them with an optional `base_url` field:
+
+```yaml
+required_fields:
+  - name: base_url
+    label: "Self-Hosted URL"
+    placeholder: "https://firecrawl.example.com"
+    input_type: url
+    help_text: "Leave empty for cloud version"
+    optional: true
+```
+
+## Connector Catalog
+
+| Category | Count | Services |
+|----------|-------|----------|
+| dev-tools | 120+ | GitHub, GitLab, Jira, Bitbucket, GitLab, Sentry, Datadog, PagerDuty, Snowflake, Vercel, Netlify, Postman, Figma |
+| productivity | 80+ | Google Workspace, Microsoft 365, Notion, Airtable, Monday, ClickUp, Trello, Asana, Evernote |
+| crm | 50+ | HubSpot, Salesforce, Pipedrive, Zoho CRM, Close, Copper |
+| communication | 40+ | Slack, Discord, Zoom, Twilio, WhatsApp, Intercom, Zendesk |
+| payment | 30+ | Stripe, Square, PayPal, Braintree, Adyen, Checkout.com |
+| marketing | 30+ | Mailchimp, Klaviyo, SendGrid, Apollo, Brevo, Constant Contact |
+| e-commerce | 25+ | Shopify, WooCommerce, Amazon Selling Partner, BigCommerce |
+| analytics | 20+ | Mixpanel, Amplitude, PostHog, Tableau, Looker, Heap |
+| hr | 20+ | BambooHR, Workday, Gusto, Personio, Greenhouse, Lever |
+| storage | 15+ | Dropbox, Box, Google Drive, OneDrive, Egnyte |
+| other | 90+ | Everything else |
 
 ## License
 
@@ -145,4 +166,4 @@ Eddy Xu
 
 ## Status
 
-Alpha — actively developed, API may evolve. Core spec model, vault, OAuth router, and adapter backends are stable with full test coverage (125+ tests). Currently used in production in the Executive Assistant agent system.
+Alpha — actively developed. Core spec model, vault, OAuth router, and adapter backends are stable with full test coverage (152+ tests). 524 connectors shipped. Currently used in production in the Executive Assistant agent system.

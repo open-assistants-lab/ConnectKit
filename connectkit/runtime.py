@@ -88,22 +88,33 @@ class ConnectorRuntime:
 
     def _load_connector(self, spec: ConnectorSpec) -> list[dict[str, Any]]:
         namespace = spec.name.replace("-", "_")
+        all_tools: list[dict[str, Any]] = []
 
-        if spec.tool_source.type == ToolSourceType.CLI:
-            adapter = CLIAdapter(spec, self.vault, self.user_id)
-            if not adapter.is_available():
+        for source in spec.get_tool_sources():
+            try:
+                if source.type == ToolSourceType.CLI:
+                    adapter = CLIAdapter(spec, self.vault, self.user_id)
+                    if not adapter.is_available():
+                        logger.warning(
+                            f"CLI not available for {spec.name}. "
+                            f"Install: {source.install}"
+                        )
+                        continue
+                    all_tools.extend(adapter.discover_tools(namespace))
+
+                elif source.type == ToolSourceType.MCP:
+                    adapter = MCPAdapter(spec, self.vault, self.user_id)
+                    all_tools.extend(
+                        _mcp_tools_from_adapter(adapter, namespace)
+                    )
+            except Exception:
                 logger.warning(
-                    f"CLI not available for {spec.name}. "
-                    f"Install: {spec.tool_source.install}"
+                    f"Failed to load tool source '{source.type}' for '{spec.name}'",
+                    exc_info=True,
                 )
-                return []
-            return adapter.discover_tools(namespace)
+                continue
 
-        elif spec.tool_source.type == ToolSourceType.MCP:
-            adapter = MCPAdapter(spec, self.vault, self.user_id)
-            return _mcp_tools_from_adapter(adapter, namespace)
-
-        return []
+        return all_tools
 
     def health(self) -> dict[str, Any]:
         result: dict[str, Any] = {"status": "ok", "connectors": {}}

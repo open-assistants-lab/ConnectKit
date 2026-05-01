@@ -57,6 +57,7 @@ class RequiredField(BaseModel):
     placeholder: str = ""
     input_type: str = "text"  # text, password, url
     help_text: str = ""
+    optional: bool = False
 
 
 class AuthConfig(BaseModel):
@@ -113,7 +114,8 @@ class ConnectorSpec(BaseModel):
     description: str = ""
     setup_guide_url: str = ""
     auth: AuthConfig
-    tool_source: ToolSource
+    tool_source: ToolSource | None = None  # deprecated, use tool_sources
+    tool_sources: list[ToolSource] = Field(default_factory=list)
     tool_descriptions: list[ToolDescription] = Field(default_factory=list)
 
     @field_validator("name")
@@ -126,6 +128,17 @@ class ConnectorSpec(BaseModel):
                 f"Connector name '{v}' must be lowercase alphanumeric with hyphens/underscores"
             )
         return v
+
+    def get_tool_sources(self) -> list[ToolSource]:
+        """Return all tool sources. Falls back to single tool_source for backward compat."""
+        if self.tool_sources:
+            return self.tool_sources
+        if self.tool_source:
+            return [self.tool_source]
+        return []
+
+    def get_mcp_sources(self) -> list[MCPToolSource]:
+        return [s for s in self.get_tool_sources() if isinstance(s, MCPToolSource)]
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ConnectorSpec":
