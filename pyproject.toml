@@ -42,6 +42,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["connectkit"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"connectors" = "connectkit/connectors"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

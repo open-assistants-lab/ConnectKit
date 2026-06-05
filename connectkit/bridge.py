@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from connectkit.runtime import ConnectorRuntime
+from connectkit.spec import ConnectorSpec
 from connectkit.vault import CredentialVault
 
 logger = logging.getLogger("connectkit")
@@ -34,9 +35,13 @@ def _default_spec_dir() -> str:
     try:
         import importlib.resources
 
-        return str(importlib.resources.files("connectkit") / "connectors")
+        packaged = Path(str(importlib.resources.files("connectkit") / "connectors"))
+        if packaged.exists():
+            return str(packaged)
     except Exception:
-        return str(Path(__file__).parent.parent / "connectors")
+        pass
+
+    return str(Path(__file__).parent.parent / "connectors")
 
 
 def get_vault(user_id: str, vault_path: str | None = None) -> CredentialVault:
@@ -90,6 +95,10 @@ class ConnectKitBridge:
 
     def list_available(self) -> list[dict[str, Any]]:
         return self._runtime.list_available()
+
+    def list_available_specs(self) -> list[ConnectorSpec]:
+        """Return full ConnectorSpec objects for all known connectors."""
+        return self._runtime.get_specs()
 
     def health(self) -> dict[str, Any]:
         vault_health = self._vault.health()
