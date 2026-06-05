@@ -3,7 +3,7 @@
 One YAML file per service. OAuth, token vault, and tool discovery handled automatically.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.4"
 
 from connectkit.bridge import ConnectKitBridge
 from connectkit.meta_tools import TOOL_SPECS

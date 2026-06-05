@@ -118,14 +118,16 @@ class CLIAdapter:
                 else f"{self.spec.display}: {cmd}"
             )
 
-            parameter_descriptions = td.parameter_descriptions if td else {}
+            params = td.build_parameters() if td else {
+                "type": "object", "properties": {},
+            }
 
             tool_def = _build_connector_tool(
                 name=tool_name,
                 description=description,
                 adapter=self,
                 args=args_from_command(cmd),
-                parameter_descriptions=parameter_descriptions,
+                parameters=params,
             )
             tools.append(tool_def)
 
@@ -153,7 +155,7 @@ def _build_connector_tool(
     description: str,
     adapter: CLIAdapter,
     args: list[str],
-    parameter_descriptions: dict[str, str] | None = None,
+    parameters: dict[str, Any] | None = None,
 ) -> Any:
     """Build a ToolDefinition-compatible object for a connector tool.
 
@@ -197,12 +199,9 @@ def _build_connector_tool(
         import asyncio
         return await asyncio.to_thread(_sync_invoke, **kwargs)
 
-    params: dict[str, Any] = {
+    params: dict[str, Any] = parameters or {
         "type": "object",
-        "properties": {
-            k: {"type": "string", "description": v}
-            for k, v in (parameter_descriptions or {}).items()
-        },
+        "properties": {},
     }
 
     return {

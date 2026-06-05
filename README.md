@@ -89,7 +89,28 @@ tool_sources:
 | `api_key` | API keys (Firecrawl, Stripe, Twilio, 288+ services) | Paste key into form → vaulted |
 | `none` | No auth needed (local tools) | Auto-connected |
 
-### Tool source backends
+### Tool descriptions (JSON Schema)
+
+Each tool can define its parameters as a JSON Schema:
+
+```yaml
+tool_descriptions:
+  - name: google_workspace__gmail_messages_list
+    description: "List recent emails from the user's Gmail inbox."
+    parameters:
+      type: object
+      properties:
+        max_results:
+          type: integer
+          description: "Maximum number of emails to return (default: 10)"
+          default: 10
+        query:
+          type: string
+          description: "Gmail search query (e.g. 'from:example@gmail.com', 'is:unread')"
+      required: []
+```
+
+Legacy `parameter_descriptions` (flat string map) is still supported for backward compatibility, but `parameters` (full JSON Schema) is preferred — it gives the LLM better type hints, defaults, and enum constraints.
 
 | Backend | Count | Best for |
 |---------|-------|----------|

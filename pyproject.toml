@@ -1,6 +1,6 @@
 [project]
 name = "connectkit"
-version = "0.1.2"
+version = "0.1.4"
 description = "Connect AI agents to SaaS — one YAML file per service. OAuth, token vault, tool discovery."
 requires-python = ">=3.11"
 readme = "README.md"

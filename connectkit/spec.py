@@ -9,7 +9,7 @@ A connector is a YAML file that describes:
 
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -101,8 +101,37 @@ ToolSource = CLIToolSource | MCPToolSource | HTTPToolSource
 
 class ToolDescription(BaseModel):
     name: str
-    description: str
-    parameter_descriptions: dict[str, str] = Field(default_factory=dict)
+    description: str = ""
+    parameters: dict[str, Any] = Field(default_factory=lambda: {
+        "type": "object",
+        "properties": {},
+    })
+    parameter_descriptions: dict[str, str] = Field(
+        default_factory=dict,
+        description="Deprecated — use 'parameters' (JSON Schema) instead.",
+    )
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_parameters(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if "type" not in v:
+            v["type"] = "object"
+        if "properties" not in v:
+            v["properties"] = {}
+        return v
+
+    def build_parameters(self) -> dict[str, Any]:
+        """Return a complete JSON Schema for this tool.
+
+        Prefers the explicit 'parameters' field. Falls back to building
+        a minimal schema from 'parameter_descriptions' for backward compat.
+        """
+        if self.parameter_descriptions and not self.parameters.get("properties"):
+            props = {}
+            for name, desc in self.parameter_descriptions.items():
+                props[name] = {"type": "string", "description": desc}
+            return {"type": "object", "properties": props}
+        return self.parameters
 
 
 class ConnectorSpec(BaseModel):
