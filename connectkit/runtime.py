@@ -1,15 +1,21 @@
-"""ConnectorRuntime — load specs, check connections, discover tools."""
+"""ConnectorRuntime — load specs, check connections, discover tools, refresh tokens."""
 
 import asyncio
 import json
 import logging
+import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from connectkit.backends.cli import CLIAdapter
 from connectkit.backends.mcp import MCPAdapter
-from connectkit.spec import ConnectorSpec, ToolSourceType
+from connectkit.spec import AuthType, ConnectorSpec, ToolSourceType
 from connectkit.vault import CredentialVault
+
+logger = logging.getLogger("connectkit")
 
 logger = logging.getLogger("connectkit")
 
@@ -49,6 +55,66 @@ class ConnectorRuntime:
 
     def reload(self) -> None:
         self._load_specs()
+
+    async def try_refresh_token(self, spec: ConnectorSpec) -> None:
+        """Refresh an OAuth2 token if it has a refresh_token and has expired."""
+        if spec.auth.type != AuthType.OAUTH2:
+            return
+        if not self.vault.is_expired(spec.name):
+            return
+
+        token = self.vault.get_token(spec.name)
+        if not token:
+            return
+        refresh_token = token.get("refresh_token")
+        if not refresh_token:
+            logger.warning(
+                f"Token for '{spec.name}' is expired and has no refresh_token. "
+                f"Reconnect required."
+            )
+            return
+
+        oauth2 = spec.auth.oauth2
+        if not oauth2:
+            return
+
+        client_id = token.get("client_id", "")
+        client_secret = token.get("client_secret", "")
+        logger.info(f"Refreshing token for '{spec.name}'...")
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                body = {
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": client_id,
+                }
+                if client_secret:
+                    body["client_secret"] = client_secret
+
+                resp = await client.post(oauth2.token_url, data=body)
+                resp.raise_for_status()
+                new_token = resp.json()
+
+                # Preserve the refresh_token if the provider didn't issue a new one
+                if "refresh_token" not in new_token:
+                    new_token["refresh_token"] = refresh_token
+                new_token["client_id"] = client_id
+                new_token["client_secret"] = client_secret
+
+                self.vault.store_token(spec.name, "oauth2", new_token)
+                logger.info(f"Token refreshed for '{spec.name}'")
+        except Exception as e:
+            logger.warning(
+                f"Failed to refresh token for '{spec.name}': {e}. "
+                f"Reconnect required."
+            )
+
+    async def refresh_all(self) -> None:
+        """Refresh all connected OAuth2 tokens that are expired."""
+        for spec in self._specs:
+            if self.vault.is_connected(spec.name):
+                await self.try_refresh_token(spec)
 
     def list_available(self) -> list[dict[str, Any]]:
         connected = set(self.vault.list_connected())

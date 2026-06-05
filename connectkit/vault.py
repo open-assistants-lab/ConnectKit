@@ -1,4 +1,4 @@
-"""CredentialVault — encrypted per-user token storage.
+"""CredentialVault — encrypted per-user token storage with OAuth2 refresh.
 
 Schema:
     CREATE TABLE credentials (
@@ -6,7 +6,8 @@ Schema:
         auth_type TEXT NOT NULL,
         encrypted_data TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        expires_at TEXT  -- nullable; set when OAuth tokens have an expiry
     );
 
     CREATE TABLE oauth_states (
@@ -20,21 +21,40 @@ Schema:
 """
 
 import json
+import logging
 import os
 import secrets
 import sqlite3
 import threading
 import warnings
-from contextlib import contextmanager
 from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
+import httpx
 from cryptography.fernet import Fernet
+
+logger = logging.getLogger("connectkit.vault")
 
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _parse_expiry(token_data: dict) -> str | None:
+    """Extract ISO expiry string from token data (expires_in or expires_at)."""
+    expires_in = token_data.get("expires_in")
+    if expires_in:
+        expires_at = datetime.now(UTC) + timedelta(seconds=int(expires_in))
+        return expires_at.isoformat()
+    expires_at = token_data.get("expires_at")
+    if expires_at:
+        if isinstance(expires_at, (int, float)):
+            expires_at = datetime.fromtimestamp(expires_at, tz=UTC).isoformat()
+        return str(expires_at)
+    return None
 
 
 def _get_or_create_key() -> bytes:
@@ -91,7 +111,8 @@ class CredentialVault:
                     auth_type TEXT NOT NULL,
                     encrypted_data TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT
                 )
             """)
             cur.execute("""
@@ -114,14 +135,15 @@ class CredentialVault:
     def store_token(self, service_name: str, auth_type: str, token_data: dict) -> None:
         now = _now_iso()
         encrypted = self._encrypt(token_data)
+        expires_at = _parse_expiry(token_data)
         with self._connect() as cur:
             cur.execute(
                 "INSERT OR REPLACE INTO credentials "
-                "(service_name, auth_type, encrypted_data, created_at, updated_at) "
+                "(service_name, auth_type, encrypted_data, created_at, updated_at, expires_at) "
                 "VALUES (?, ?, ?, COALESCE(("
                 "SELECT created_at FROM credentials WHERE service_name = ?"
-                "), ?), ?)",
-                (service_name, auth_type, encrypted, service_name, now, now),
+                "), ?), ?, ?)",
+                (service_name, auth_type, encrypted, service_name, now, now, expires_at),
             )
 
     def get_token(self, service_name: str) -> dict | None:
@@ -134,6 +156,30 @@ class CredentialVault:
         if not row:
             return None
         return self._decrypt(row["encrypted_data"])
+
+    def get_token_with_expiry(self, service_name: str) -> tuple[dict | None, str | None]:
+        """Return (token_data, expires_at_iso) or (None, None)."""
+        with self._connect() as cur:
+            cur.execute(
+                "SELECT encrypted_data, expires_at FROM credentials WHERE service_name = ?",
+                (service_name,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None, None
+        return self._decrypt(row["encrypted_data"]), row["expires_at"]
+
+    def is_expired(self, service_name: str) -> bool:
+        """Check if a token is past its expiry threshold (30s buffer)."""
+        _, expires_at = self.get_token_with_expiry(service_name)
+        if not expires_at:
+            return False
+        try:
+            expires_dt = datetime.fromisoformat(expires_at)
+            # 30-second buffer to avoid racing expiry
+            return datetime.now(UTC) >= (expires_dt - timedelta(seconds=30))
+        except Exception:
+            return False
 
     def delete_token(self, service_name: str) -> bool:
         with self._connect() as cur:

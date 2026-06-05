@@ -85,10 +85,15 @@ class ConnectKitBridge:
         return self._vault
 
     async def discover(self) -> None:
+        await self._runtime.refresh_all()
         self._tools = await self._runtime.get_tools()
         logger.info(
             f"connectkit.discover user={self.user_id} tools={len(self._tools)}"
         )
+
+    async def refresh_all(self) -> None:
+        """Refresh all expired OAuth tokens."""
+        await self._runtime.refresh_all()
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         return self._tools
