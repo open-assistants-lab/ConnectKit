@@ -43,8 +43,8 @@ def create_oauth_router(
 
     def _redirect_uri(base: str, service: str) -> str:
         if base:
-            return f"{base.rstrip('/')}/auth/callback?service={service}"
-        return f"/auth/callback?service={service}"
+            return f"{base.rstrip('/')}/auth/callback"
+        return "/auth/callback"
 
     def _build_authorize_url(spec: ConnectorSpec, state: str) -> str:
         oauth = spec.auth.oauth2
