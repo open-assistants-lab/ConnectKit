@@ -1,5 +1,6 @@
 """ConnectorRuntime — load specs, check connections, discover tools."""
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -22,7 +23,7 @@ class ConnectorRuntime:
             vault=CredentialVault("./data/users/alice"),
             user_id="alice",
         )
-        tools = runtime.get_tools()
+        tools = await runtime.get_tools()  # async for MCP discovery
         available = runtime.list_available()
         health = runtime.health()
     """
@@ -68,25 +69,48 @@ class ConnectorRuntime:
             for s in self._specs
         ]
 
-    def get_tools(self) -> list[dict[str, Any]]:
+    async def get_tools(self) -> list[dict[str, Any]]:
+        """Discover tools for all connected connectors. Async — MCP servers are spawned per-spec."""
         tools: list[dict[str, Any]] = []
 
         for spec in self._specs:
             if not self.vault.is_connected(spec.name):
                 continue
 
+            mcp_sources = spec.get_mcp_sources()
+            if mcp_sources:
+                try:
+                    adapter_tools = await _discover_mcp_tools(spec, self.vault, self.user_id)
+                    tools.extend(adapter_tools)
+                except Exception:
+                    logger.warning(f"Failed to load MCP connector '{spec.name}'", exc_info=True)
+                continue
+
             try:
-                adapter_tools = self._load_connector(spec)
+                adapter_tools = self._load_cli_connector(spec)
                 tools.extend(adapter_tools)
             except Exception:
-                logger.warning(
-                    f"Failed to load connector '{spec.name}'", exc_info=True
-                )
+                logger.warning(f"Failed to load connector '{spec.name}'", exc_info=True)
                 continue
 
         return tools
 
-    def _load_connector(self, spec: ConnectorSpec) -> list[dict[str, Any]]:
+    def get_tools_sync(self) -> list[dict[str, Any]]:
+        """Sync fallback — only discovers CLI tools. MCP sources are skipped."""
+        tools: list[dict[str, Any]] = []
+        for spec in self._specs:
+            if not self.vault.is_connected(spec.name):
+                continue
+            if spec.get_mcp_sources():
+                continue
+            try:
+                adapter_tools = self._load_cli_connector(spec)
+                tools.extend(adapter_tools)
+            except Exception:
+                continue
+        return tools
+
+    def _load_cli_connector(self, spec: ConnectorSpec) -> list[dict[str, Any]]:
         namespace = spec.name.replace("-", "_")
         all_tools: list[dict[str, Any]] = []
 
@@ -101,12 +125,6 @@ class ConnectorRuntime:
                         )
                         continue
                     all_tools.extend(adapter.discover_tools(namespace))
-
-                elif source.type == ToolSourceType.MCP:
-                    adapter = MCPAdapter(spec, self.vault, self.user_id)
-                    all_tools.extend(
-                        _mcp_tools_from_adapter(adapter, namespace)
-                    )
             except Exception:
                 logger.warning(
                     f"Failed to load tool source '{source.type}' for '{spec.name}'",
@@ -116,7 +134,7 @@ class ConnectorRuntime:
 
         return all_tools
 
-    def health(self) -> dict[str, Any]:
+    async def health(self) -> dict[str, Any]:
         result: dict[str, Any] = {"status": "ok", "connectors": {}}
         connected_count = 0
         error_count = 0
@@ -128,7 +146,11 @@ class ConnectorRuntime:
 
             connected_count += 1
             try:
-                tools = self._load_connector(spec)
+                if spec.get_mcp_sources():
+                    mcp_tools = await _discover_mcp_tools(spec, self.vault, self.user_id)
+                    tools = mcp_tools
+                else:
+                    tools = self._load_cli_connector(spec)
                 result["connectors"][spec.name] = {
                     "status": "ok",
                     "tools": len(tools),
@@ -146,44 +168,69 @@ class ConnectorRuntime:
         return result
 
 
-def _mcp_tools_from_adapter(adapter: MCPAdapter, namespace: str) -> list[dict[str, Any]]:
-    """Generate a placeholder tool set for an MCP connector.
+def _make_mcp_invoker(command: str, env: dict[str, str], tool_name: str):
+    """Factory: returns async function that spawns MCP server, calls tool, returns result."""
+    async def ainvoke(**kwargs: Any) -> str:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
 
-    The actual tools are discovered by the MCP server at runtime.
-    We return a single meta-tool that documents the connector status
-    and the command that would be run.
+        parts = command.split()
+        sp = StdioServerParameters(command=parts[0], args=parts[1:], env=env)
+        async with stdio_client(sp) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments=kwargs)
+                return json.dumps(
+                    {c.type: c.text for c in result.content}
+                )
+    return ainvoke
 
-    When EA's MCPToolBridge integrates, it replaces this with real tools.
-    """
-    config = adapter.get_mcp_config()
-    name = f"{namespace}__mcp_status"
-    return [
-        {
-            "name": name,
-            "description": (
-                f"MCP connector for {adapter.spec.display}. "
-                f"Server: {config['command']}. "
-                f"Use the MCP bridge to discover available tools."
-            ),
-            "parameters": {"type": "object", "properties": {}},
-            "function": lambda: {
-                "content": json.dumps(
-                    {"status": "ready", "server": config["command"]}
-                ),
-                "structured_content": {
-                    "status": "ready",
-                    "server": config["command"],
-                },
-                "is_error": False,
-            },
-            "ainvoke": None,
-            "annotations": {
-                "read_only": True,
-                "destructive": False,
-                "idempotent": True,
-                "title": name,
-            },
-            "_is_mcp_placeholder": True,
-        }
-    ]
+
+async def _discover_mcp_tools(
+    spec: ConnectorSpec, vault: CredentialVault, user_id: str
+) -> list[dict[str, Any]]:
+    """Spawn MCP server, list_tools(), convert to ConnectKit tool dicts."""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    adapter = MCPAdapter(spec, vault, user_id)
+    env = adapter.build_server_env()
+    namespace = spec.name.replace("-", "_")
+    parts = adapter.command.split()
+    server_params = StdioServerParameters(
+        command=parts[0], args=parts[1:], env=env
+    )
+
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.list_tools()
+
+            tools: list[dict[str, Any]] = []
+            for mcp_tool in result.tools:
+                input_schema = mcp_tool.inputSchema or {
+                    "type": "object",
+                    "properties": {},
+                }
+                tool_name = f"{namespace}__{mcp_tool.name}"
+                tools.append(
+                    {
+                        "name": tool_name,
+                        "description": mcp_tool.description or "",
+                        "parameters": input_schema,
+                        "function": None,
+                        "ainvoke": _make_mcp_invoker(
+                            adapter.command, env, mcp_tool.name
+                        ),
+                        "annotations": {
+                            "read_only": False,
+                            "destructive": False,
+                            "idempotent": False,
+                            "title": tool_name,
+                            "mcp_server": adapter.server_name,
+                            "_mcp_connector": spec.name,
+                        },
+                    }
+                )
+            return tools
 

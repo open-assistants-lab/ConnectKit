@@ -85,7 +85,7 @@ class ConnectKitBridge:
         return self._vault
 
     async def discover(self) -> None:
-        self._tools = self._runtime.get_tools()
+        self._tools = await self._runtime.get_tools()
         logger.info(
             f"connectkit.discover user={self.user_id} tools={len(self._tools)}"
         )
@@ -97,7 +97,6 @@ class ConnectKitBridge:
         return self._runtime.list_available()
 
     def list_available_specs(self) -> list[ConnectorSpec]:
-        """Return full ConnectorSpec objects for all known connectors."""
         return self._runtime.get_specs()
 
     def health(self) -> dict[str, Any]:

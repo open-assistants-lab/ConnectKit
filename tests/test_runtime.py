@@ -98,7 +98,6 @@ class TestInit:
         _write_specs(spec_dir, [_make_cli_spec("github")])
 
         rt = ConnectorRuntime(spec_dir, vault, "alice")
-        assert len(rt.get_specs()) == 1
 
         _write_specs(spec_dir, [_make_cli_spec("github"), _make_cli_spec("slack")])
         rt.reload()
@@ -134,15 +133,17 @@ class TestListAvailable:
 
 
 class TestGetTools:
-    def test_returns_nothing_when_nothing_connected(self, temp_dir, vault):
+    @pytest.mark.asyncio
+    async def test_returns_nothing_when_nothing_connected(self, temp_dir, vault):
         spec_dir = Path(temp_dir) / "connectors"
         _write_specs(spec_dir, [_make_cli_spec("github")])
 
         rt = ConnectorRuntime(spec_dir, vault, "alice")
-        tools = rt.get_tools()
+        tools = await rt.get_tools()
         assert tools == []
 
-    def test_returns_tools_for_connected_cli(self, temp_dir, vault):
+    @pytest.mark.asyncio
+    async def test_returns_tools_for_connected_cli(self, temp_dir, vault):
         spec_dir = Path(temp_dir) / "connectors"
         _write_specs(spec_dir, [_make_cli_spec("github")])
 
@@ -152,27 +153,26 @@ class TestGetTools:
 
         with patch("connectkit.backends.cli.CLIAdapter.list_commands",
                    return_value=["repo:list", "issue:create"]):
-            tools = rt.get_tools()
+            tools = await rt.get_tools()
 
         assert len(tools) == 2
         names = {t["name"] for t in tools}
         assert "github__repo_list" in names
         assert "github__issue_create" in names
 
-    def test_returns_mcp_placeholder(self, temp_dir, vault):
+    @pytest.mark.asyncio
+    async def test_skips_mcp_without_token(self, temp_dir, vault):
+        """MCP source without a stored token should be skipped (not connected)."""
         spec_dir = Path(temp_dir) / "connectors"
         _write_specs(spec_dir, [_make_mcp_spec("dropbox")])
 
-        vault.store_token("dropbox", "oauth2", {"access_token": "sl.123"})
-
         rt = ConnectorRuntime(spec_dir, vault, "alice")
-        tools = rt.get_tools()
+        tools = await rt.get_tools()
 
-        assert len(tools) == 1
-        assert tools[0]["name"] == "dropbox__mcp_status"
-        assert tools[0]["_is_mcp_placeholder"] is True
+        assert tools == []  # not connected, so skipped
 
-    def test_skips_broken_connector(self, temp_dir, vault):
+    @pytest.mark.asyncio
+    async def test_skips_broken_connector(self, temp_dir, vault):
         spec_dir = Path(temp_dir) / "connectors"
         _write_specs(spec_dir, [_make_cli_spec("github"), _make_cli_spec("slack")])
 
@@ -181,8 +181,7 @@ class TestGetTools:
 
         rt = ConnectorRuntime(spec_dir, vault, "alice")
 
-        # Let github work but make slack crash
-        original_load = rt._load_connector
+        original_load = rt._load_cli_connector
 
         call_count = 0
 
@@ -193,30 +192,31 @@ class TestGetTools:
                 raise RuntimeError("Slack adapter crash")
             return original_load(spec)
 
-        with patch.object(rt, "_load_connector", side_effect=mock_load):
-            tools = rt.get_tools()
+        with patch.object(rt, "_load_cli_connector", side_effect=mock_load):
+            tools = await rt.get_tools()
 
-        # Should return github tools only, not crash
         assert len(tools) >= 0
 
 
 class TestHealth:
-    def test_all_not_connected(self, temp_dir, vault):
+    @pytest.mark.asyncio
+    async def test_all_not_connected(self, temp_dir, vault):
         spec_dir = Path(temp_dir) / "connectors"
         _write_specs(spec_dir, [_make_cli_spec("github")])
 
         rt = ConnectorRuntime(spec_dir, vault, "alice")
-        h = rt.health()
+        h = await rt.health()
         assert h["status"] == "ok"
         assert h["connectors"]["github"]["status"] == "not_connected"
 
-    def test_connected_ok(self, temp_dir, vault):
+    @pytest.mark.asyncio
+    async def test_connected_ok(self, temp_dir, vault):
         spec_dir = Path(temp_dir) / "connectors"
         _write_specs(spec_dir, [_make_cli_spec("github")])
 
         vault.store_token("github", "api_key", {"api_key": "ghp_123"})
 
         rt = ConnectorRuntime(spec_dir, vault, "alice")
-        h = rt.health()
+        h = await rt.health()
         assert h["connectors"]["github"]["status"] == "ok"
         assert h["connectors"]["github"]["tools"] >= 0

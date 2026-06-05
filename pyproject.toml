@@ -1,6 +1,6 @@
 [project]
 name = "connectkit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Connect AI agents to SaaS — one YAML file per service. OAuth, token vault, tool discovery."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -27,6 +27,7 @@ dependencies = [
     "cryptography>=41.0",
     "httpx>=0.28",
     "fastapi>=0.129",
+    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]
