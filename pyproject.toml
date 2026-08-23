@@ -1,9 +1,13 @@
 [project]
 name = "connectkit"
-version = "0.1.5"
+version = "0.1.6"
 description = "Connect AI agents to SaaS — one YAML file per service. OAuth, token vault, tool discovery."
 requires-python = ">=3.11"
 readme = "README.md"
+[project.urls]
+Homepage = "https://openassistants.org"
+Source = "https://github.com/open-assistants-lab/ConnectKit"
+
 license = {text = "MIT"}
 keywords = ["agent", "ai", "saas", "oauth", "connector", "mcp", "tools"]
 authors = [

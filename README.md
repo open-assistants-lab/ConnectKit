@@ -1,5 +1,8 @@
 # ConnectKit
 
+[![PyPI version](https://img.shields.io/pypi/v/connectkit)](https://pypi.org/project/connectkit/)
+[![Downloads](https://img.shields.io/pypi/dm/connectkit)](https://pypi.org/project/connectkit/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 > **Purposefully built for AI Agents.** ConnectKit gives agents access to user SaaS accounts — Gmail, Calendar, Drive, GitHub, Slack, and 520+ more — through one YAML file per service. OAuth, API keys, token vault, and tool discovery handled automatically. Used in production by the [Executive Assistant](https://github.com/open-assistants-lab) agent system.
 
 > **Embedded. Local. Open source.** No cloud APIs, no hosted auth services. Runs entirely on-device with an encrypted SQLite credential vault + local YAML specs. Ships as a single Python package with zero external infrastructure dependencies.
